@@ -9,18 +9,20 @@ This is a fork of Joe Ferners' library node-http-mitm-proxy (see docs below). It
 * 2022-03-31: 0.9.2 - Updated dependencies due to security issues. Improved HTTPS stability. IPv6 Support.
 * 2019-08-01: Updated dependencies due to security issues
 
+# @dev-swarup fork
+This is a fork of bjowes' library node-http-mitm-proxy. This release was made to remove the certificate saving on the disk.
+
 # HTTP MITM Proxy
 
 HTTP Man In The Middle (MITM) Proxy written in node.js. Supports capturing and modifying the request and response data.
 
-[![NPM version](http://img.shields.io/npm/v/http-mitm-proxy.svg)](https://www.npmjs.com/package/http-mitm-proxy)
-[![](https://david-dm.org/joeferner/node-http-mitm-proxy.svg)](https://david-dm.org/joeferner/node-http-mitm-proxy)
-[![Downloads](https://img.shields.io/npm/dm/http-mitm-proxy.svg)](https://www.npmjs.com/package/http-mitm-proxy)
-![Test Status](https://github.com/joeferner/node-http-mitm-proxy/workflows/Tests/badge.svg)
+[![NPM version](http://img.shields.io/npm/v/@dev-swarup/http-mitm-proxy.svg)](https://www.npmjs.com/package/@dev-swarup/http-mitm-proxy)
+[![Downloads](https://img.shields.io/npm/dm/@dev-swarup/http-mitm-proxy.svg)](https://www.npmjs.com/package/@dev-swarup/http-mitm-proxy)
+![Test Status](https://github.com/@dev-swarup/http-mitm-proxy/workflows/Tests/badge.svg)
 
 # Install
 
-`npm install --save http-mitm-proxy`
+`npm install --save @dev-swarup/http-mitm-proxy`
 
 ## Node.js Compatibility
 The library should work starting Node.js 8.x, but testing is only expected for currently supported LTS versions of Node.js starting Node.js 12.x . use on your own risk with non LTS Node.js versions.
@@ -33,7 +35,7 @@ type definitions are now included in this project, no extra steps required.
 This example will modify any search results coming from google and replace all the result titles with "Pwned!".
 
 ```javascript
-var Proxy = require('http-mitm-proxy');
+var Proxy = require('@dev-swarup/http-mitm-proxy');
 var proxy = Proxy();
 
 proxy.onError(function(ctx, err) {
@@ -56,7 +58,7 @@ proxy.onRequest(function(ctx, callback) {
 proxy.listen({port: 8081});
 ```
 
-You can find more examples in the [examples directory](https://github.com/joeferner/node-http-mitm-proxy/tree/master/examples)
+You can find more examples in the [examples directory](https://github.com/@dev-swarup/http-mitm-proxy/tree/master/examples)
 
 # SSL
 
