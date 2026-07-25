@@ -1,535 +1,551 @@
-# @bjowes fork
+# @dev-swarup/http-mitm-proxy
 
-This is a fork of Joe Ferners' library node-http-mitm-proxy (see docs below). Its first release was identical to the master version of the original library, commit 66ac0f5d3298f66b731f90ebf1e9b430fa5d76eb. I decided to publish a scoped version of this library to npm, since I needed the codebase in npm. It is only intended for my own library cypress-ntlm-auth. Use at you own risk!
-
-* 2025-01-27: 0.9.6 - Dependency bump
-* 2024-03-27: 0.9.5 - Patch for custom status messages, dependency bump
-* 2022-04-08: 0.9.4 - Address accessor, typings fix
-* 2022-04-04: 0.9.3 - Patch for cert filenames with IPv6 sites.
-* 2022-03-31: 0.9.2 - Updated dependencies due to security issues. Improved HTTPS stability. IPv6 Support.
-* 2019-08-01: Updated dependencies due to security issues
-
-# @dev-swarup fork
-This is a fork of bjowes' library node-http-mitm-proxy. This release was made to remove the certificate saving on the disk.
-
-# HTTP MITM Proxy
-
-HTTP Man In The Middle (MITM) Proxy written in node.js. Supports capturing and modifying the request and response data.
+HTTP Man In The Middle (MITM) Proxy written in Node.js. Supports capturing and modifying HTTP and HTTPS request/response data, WebSocket frames, and optional proxy authentication.
 
 [![NPM version](http://img.shields.io/npm/v/@dev-swarup/http-mitm-proxy.svg)](https://www.npmjs.com/package/@dev-swarup/http-mitm-proxy)
 [![Downloads](https://img.shields.io/npm/dm/@dev-swarup/http-mitm-proxy.svg)](https://www.npmjs.com/package/@dev-swarup/http-mitm-proxy)
-![Test Status](https://github.com/@dev-swarup/http-mitm-proxy/workflows/Tests/badge.svg)
 
-# Install
+---
 
-`npm install --save @dev-swarup/http-mitm-proxy`
+## Changelog
 
-## Node.js Compatibility
-The library should work starting Node.js 8.x, but testing is only expected for currently supported LTS versions of Node.js starting Node.js 12.x . use on your own risk with non LTS Node.js versions.
+* **2026-07-26: 1.0.0** — In-memory certificate generation (no disk writes per host), optional proxy authentication (`onAuthenticate`), gzip/deflate/Brotli decompression middleware, 9 bug fixes, performance improvements, full JSDoc.
+* 2025-01-27: 0.9.6 — Dependency bump
+* 2024-03-27: 0.9.5 — Patch for custom status messages, dependency bump
+* 2022-04-08: 0.9.4 — Address accessor, typings fix
+* 2022-04-04: 0.9.3 — Patch for cert filenames with IPv6 sites
+* 2022-03-31: 0.9.2 — Updated dependencies, improved HTTPS stability, IPv6 support
 
-## Typescript
-type definitions are now included in this project, no extra steps required.
+---
 
-# Example
+## Install
 
-This example will modify any search results coming from google and replace all the result titles with "Pwned!".
+```bash
+npm install --save @dev-swarup/http-mitm-proxy
+```
+
+### Node.js Compatibility
+
+Node.js **≥ 14** is required. Testing targets current LTS releases.
+
+### TypeScript
+
+Type definitions are bundled — no extra steps required.
+
+---
+
+## Quick Example
+
+Intercept Google search responses and replace all result titles with "Pwned!":
 
 ```javascript
 var Proxy = require('@dev-swarup/http-mitm-proxy');
 var proxy = Proxy();
 
-proxy.onError(function(ctx, err) {
-  console.error('proxy error:', err);
+proxy.onError(function(ctx, err, errorKind) {
+  var url = (ctx && ctx.clientToProxyRequest) ? ctx.clientToProxyRequest.url : '';
+  console.error(errorKind + ' on ' + url + ':', err);
 });
 
 proxy.onRequest(function(ctx, callback) {
-  if (ctx.clientToProxyRequest.headers.host == 'www.google.com'
-    && ctx.clientToProxyRequest.url.indexOf('/search') == 0) {
+  if (ctx.clientToProxyRequest.headers.host === 'www.google.com'
+    && ctx.clientToProxyRequest.url.indexOf('/search') === 0) {
     ctx.use(Proxy.gunzip);
 
     ctx.onResponseData(function(ctx, chunk, callback) {
-      chunk = new Buffer(chunk.toString().replace(/<h3.*?<\/h3>/g, '<h3>Pwned!</h3>'));
+      chunk = Buffer.from(chunk.toString().replace(/<h3.*?<\/h3>/g, '<h3>Pwned!</h3>'));
       return callback(null, chunk);
     });
   }
   return callback();
 });
 
-proxy.listen({port: 8081});
+proxy.listen({ port: 8081 });
 ```
 
-You can find more examples in the [examples directory](https://github.com/@dev-swarup/http-mitm-proxy/tree/master/examples)
+---
 
-# SSL
+## SSL / HTTPS Interception
 
-Using node-forge allows the automatic generation of SSL certificates within the proxy. After running your app you will find options.sslCaDir + '/certs/ca.pem' which can be imported to your browser, phone, etc.
+The proxy intercepts HTTPS traffic by acting as a MITM. It auto-generates TLS certificates on demand using a local root CA (powered by [node-forge](https://github.com/digitalbazaar/forge)).
 
-# API
+**Certificates are generated entirely in memory** — only the root CA cert/key is stored on disk so that it can be trusted once across proxy restarts.
 
-## Proxy
- * [listen(options)](#proxy_listen)
- * [close](#proxy_close)
- * [onError(fn)](#proxy_onError)
- * [onCertificateRequired](#proxy_onCertificateRequired)
- * [onCertificateMissing](#proxy_onCertificateMissing)
- * [onRequest(fn)](#proxy_onRequest)
- * [onRequestData(fn)](#proxy_onRequestData)
- * [onRequestEnd(fn)](#proxy_onRequestEnd)
- * [onResponse(fn)](#proxy_onResponse)
- * [onResponseData(fn)](#proxy_onResponseData)
- * [onResponseEnd(fn)](#proxy_onResponseEnd)
- * [onWebSocketConnection(fn)](#proxy_onWebSocketConnection)
- * [onWebSocketSend(fn)](#proxy_onWebSocketSend)
- * [onWebSocketMessage(fn)](#proxy_onWebSocketMessage)
- * [onWebSocketFrame(fn)](#proxy_onWebSocketFrame)
- * [onWebSocketError(fn)](#proxy_onWebSocketError)
- * [onWebSocketClose(fn)](#proxy_onWebSocketClose)
- * [use(fn)](#proxy_use)
+After first run, import the CA certificate into your browser, device, or OS trust store:
 
-## Context
+```
+<sslCaDir>/certs/ca.pem   (default: <cwd>/.http-mitm-proxy/certs/ca.pem)
+```
 
- Context functions only effect the current request/response. For example you may only want to gunzip requests
- made to a particular host.
+---
 
- * isSSL: boolean,
- * clientToProxyRequest: [IncomingMessage](https://nodejs.org/api/http.html#http_http_incomingmessage),
- * proxyToClientResponse: [ServerResponse](https://nodejs.org/api/http.html#http_class_http_serverresponse),
- * proxyToServerRequest: [ClientRequest](https://nodejs.org/api/http.html#http_class_http_clientrequest),
- * serverToProxyResponse: [IncomingMessage](https://nodejs.org/api/http.html#http_http_incomingmessage),
- * [onError(fn)](#proxy_onError)
- * [onRequest(fn)](#proxy_onRequest)
- * [onRequestData(fn)](#proxy_onRequestData)
- * [onRequestEnd(fn)](#proxy_onRequestEnd)
- * [addRequestFilter(fn)](#context_addRequestFilter)
- * [onResponse(fn)](#proxy_onResponse)
- * [onResponseData(fn)](#proxy_onResponseData)
- * [onResponseEnd(fn)](#proxy_onResponseEnd)
- * [addResponseFilter(fn)](#context_addResponseFilter)
- * [use(mod)](#proxy_use)
+## Authentication
 
-## WebSocket Context
+Use `proxy.onAuthenticate(fn)` to restrict access by IP address or HTTP Basic credentials. If this method is never called the proxy is **open** (no authentication required).
 
-The context available in websocket handlers is a bit different
+Unauthenticated requests receive a `407 Proxy Authentication Required` response. Credentials are **never forwarded** to upstream servers.
 
- * isSSL: boolean,
- * clientToProxyWebSocket: [WebSocket](https://github.com/websockets/ws/blob/master/doc/ws.md#class-wswebsocket),
- * proxyToServerWebSocket: [WebSocket](https://github.com/websockets/ws/blob/master/doc/ws.md#class-wswebsocket),
- * [onWebSocketConnection(fn)](#proxy_onWebSocketConnection)
- * [onWebSocketSend(fn)](#proxy_onWebSocketSend)
- * [onWebSocketMessage(fn)](#proxy_onWebSocketMessage)
- * [onWebSocketFrame(fn)](#proxy_onWebSocketFrame)
- * [onWebSocketError(fn)](#proxy_onWebSocketError)
- * [onWebSocketClose(fn)](#proxy_onWebSocketClose)
- * [use(mod)](#proxy_use)
+```javascript
+// IP allowlist — use the direct socket IP (unforgeable)
+proxy.onAuthenticate(function(req, credentials, callback) {
+  var allowed = ['127.0.0.1', '::1'];
+  if (allowed.includes(credentials.ip)) return callback();
+  return callback(new Error('IP not allowed'));
+});
 
-<a name="proxy"/>
+// Username + password (Proxy-Authorization: Basic header)
+proxy.onAuthenticate(function(req, credentials, callback) {
+  if (credentials.username === 'user' && credentials.password === 'pass') {
+    return callback();
+  }
+  return callback(new Error('Unauthorized'));
+});
 
-## Proxy
+// Combined: local IP bypasses auth, everyone else needs credentials
+proxy.onAuthenticate(function(req, credentials, callback) {
+  if (credentials.ip === '127.0.0.1') return callback();
+  if (credentials.username === 'user' && credentials.password === 'pass') return callback();
+  return callback(new Error('Unauthorized'));
+});
 
-<a name="proxy_listen" />
+// Behind a reverse proxy — check X-Forwarded-For chain
+proxy.onAuthenticate(function(req, credentials, callback) {
+  // credentials.forwardedFor is the parsed X-Forwarded-For header chain
+  // (leftmost = original client). ⚠ Advisory only — can be forged by clients.
+  var originIp = credentials.forwardedFor[0] || credentials.ip;
+  if (originIp === '10.0.0.5') return callback();
+  return callback(new Error('IP not allowed'));
+});
+```
+
+### `credentials` object
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `ip` | `string` | Direct TCP socket IP — always present, **unforgeable** |
+| `forwardedFor` | `string[]` | Parsed `X-Forwarded-For` chain, `[]` if header absent. Advisory only — can be forged. |
+| `username` | `string?` | Decoded from `Proxy-Authorization: Basic` header |
+| `password` | `string?` | Decoded from `Proxy-Authorization: Basic` header |
+
+---
+
+## API Reference
+
+### Proxy
+
+| Method | Description |
+|--------|-------------|
+| [`proxy.listen(options, [callback])`](#proxylisten) | Start the proxy |
+| [`proxy.close()`](#proxyclose) | Stop the proxy |
+| [`proxy.address()`](#proxyaddress) | Get the bound address |
+| [`proxy.onAuthenticate(fn)`](#proxyonauthenticate) | Optional authentication |
+| [`proxy.onError(fn)`](#proxyonerror) | Error handler |
+| [`proxy.onConnect(fn)`](#proxyonconnect) | CONNECT method handler |
+| [`proxy.onRequestHeaders(fn)`](#proxyonrequestheaders) | Request header hook |
+| [`proxy.onRequest(fn)`](#proxyonrequest) | Request start hook |
+| [`proxy.onRequestData(fn)`](#proxyonrequestdata) | Request body chunk hook |
+| [`proxy.onRequestEnd(fn)`](#proxyonrequestend) | Request body end hook |
+| [`proxy.onResponseHeaders(fn)`](#proxyonresponseheaders) | Response header hook |
+| [`proxy.onResponse(fn)`](#proxyonresponse) | Response start hook |
+| [`proxy.onResponseData(fn)`](#proxyonresponsedata) | Response body chunk hook |
+| [`proxy.onResponseEnd(fn)`](#proxyonresponseend) | Response body end hook |
+| [`proxy.onWebSocketConnection(fn)`](#proxyonwebsocketconnection) | WebSocket connect hook |
+| [`proxy.onWebSocketSend(fn)`](#proxyonwebsocketsend) | Client→server frame hook |
+| [`proxy.onWebSocketMessage(fn)`](#proxyonwebsocketmessage) | Server→client frame hook |
+| [`proxy.onWebSocketFrame(fn)`](#proxyonwebsocketframe) | All WebSocket frames hook |
+| [`proxy.onWebSocketError(fn)`](#proxyonwebsocketerror) | WebSocket error hook |
+| [`proxy.onWebSocketClose(fn)`](#proxyonwebsocketclose) | WebSocket close hook |
+| [`proxy.use(module)`](#proxyuse) | Install a middleware module |
+
+### Context
+
+All `on*` methods above are also available on the `ctx` object inside handlers, scoping the effect to the current request only.
+
+Additional context-only methods:
+
+| Method | Description |
+|--------|-------------|
+| [`ctx.addRequestFilter(stream)`](#ctxaddrequestfilter) | Insert a transform stream into the request pipeline |
+| [`ctx.addResponseFilter(stream)`](#ctxaddresponsefilter) | Insert a transform stream into the response pipeline |
+
+---
 
 ### proxy.listen
 
 Starts the proxy listening on the given port.
 
-__Arguments__
+**Arguments**
 
- * options - An object with the following options:
-  * port - The port or named socket to listen on (default: 8080).
-  * host - The hostname or local address to listen on (default: 'localhost'). Pass '::' to listen on all IPv4/IPv6 interfaces.
-  * sslCaDir - Path to the certificates cache directory (default: process.cwd() + '/.http-mitm-proxy')
-  * keepAlive - enable [HTTP persistent connection](https://en.wikipedia.org/wiki/HTTP_persistent_connection)
-  * timeout - The number of milliseconds of inactivity before a socket is presumed to have timed out. Defaults to no timeout.
-  * httpAgent - The [http.Agent](https://nodejs.org/api/http.html#http_class_http_agent) to use when making http requests. Useful for chaining proxys. (default: internal Agent)
-  * httpsAgent - The [https.Agent](https://nodejs.org/api/https.html#https_class_https_agent) to use when making https requests. Useful for chaining proxys. (default: internal Agent)
-  * forceSNI - force use of [SNI](https://en.wikipedia.org/wiki/Server_Name_Indication) by the client. Allow node-http-mitm-proxy to handle all HTTPS requests with a single internal server.
-  * httpsPort - The port or named socket for https server to listen on. _(forceSNI must be enabled)_
-  * forceChunkedRequest - Setting this option will remove the content-length from the proxy to server request, forcing chunked encoding.
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `port` | `number` | `8080` | Port to listen on. Use `0` for an OS-assigned port. |
+| `host` | `string` | `'localhost'` | Interface to bind to. Pass `'::'` to listen on all IPv4/IPv6 interfaces. |
+| `sslCaDir` | `string` | `<cwd>/.http-mitm-proxy` | Directory for the root CA certificate and key. Per-host certs are kept in memory only. |
+| `keepAlive` | `boolean` | `false` | Enable HTTP persistent connections. |
+| `timeout` | `number` | `0` | Socket inactivity timeout in ms (0 = no timeout). |
+| `httpAgent` | `http.Agent` | internal | Custom agent for upstream HTTP requests. |
+| `httpsAgent` | `https.Agent` | internal | Custom agent for upstream HTTPS requests. |
+| `forceSNI` | `boolean` | `false` | Route all HTTPS through a single SNI-capable server. |
+| `httpsPort` | `number` | — | Port for the SNI HTTPS server (`forceSNI` must be `true`). |
+| `forceChunkedRequest` | `boolean` | `false` | Strip `content-length` from proxied requests, forcing chunked encoding. |
 
-__Example__
+```javascript
+proxy.listen({ port: 8080 }, function(err) {
+  if (err) throw err;
+  console.log('Proxy listening on', proxy.httpPort);
+});
+```
 
-    proxy.listen({ port: 80 });
-
-<a name="proxy_close" />
+---
 
 ### proxy.close
 
-Stops the proxy listening.
+Stops the proxy and all associated HTTPS interception servers.
 
-__Example__
+```javascript
+proxy.close();
+```
 
-    proxy.close();
+---
 
-<a name="proxy_onError" />
+### proxy.address
 
-### proxy.onError(fn) or ctx.onError(fn)
+Returns the address the HTTP server is bound to, or `null` if not yet listening.
 
-Adds a function to the list of functions to get called if an error occures.
+```javascript
+var addr = proxy.address();
+// { address: '127.0.0.1', family: 'IPv4', port: 8080 }
+```
 
-__Arguments__
+---
 
- * fn(ctx, err, errorKind) - The function to be called on an error.
+### proxy.onAuthenticate
 
-__Example__
+Registers an optional authenticator. See the [Authentication](#authentication) section above for full details and examples.
 
-    proxy.onError(function(ctx, err, errorKind) {
-      // ctx may be null
-      var url = (ctx && ctx.clientToProxyRequest) ? ctx.clientToProxyRequest.url : "";
-      console.error(errorKind + ' on ' + url + ':', err);
-    });
+```javascript
+proxy.onAuthenticate(function(req, credentials, callback) {
+  // credentials = { ip, forwardedFor, username?, password? }
+  if (credentials.ip === '127.0.0.1') return callback();
+  return callback(new Error('Unauthorized'));
+});
+```
 
-<a name="proxy_onCertificateRequired" />
+---
 
-### proxy.onCertificateRequired = function(hostname, callback)
+### proxy.onError
 
-Allows the default certificate name/path computation to be overwritten.
+Adds a handler called when an error occurs at any stage.
 
-The default behavior expects `keys/{hostname}.pem` and `certs/{hostname}.pem` files to be at `self.sslCaDir`.
+```javascript
+proxy.onError(function(ctx, err, errorKind) {
+  // ctx may be null for server-level errors
+  var url = (ctx && ctx.clientToProxyRequest) ? ctx.clientToProxyRequest.url : '';
+  console.error(errorKind + ' on ' + url + ':', err);
+});
+```
 
-__Arguments__
+---
 
- * hostname - Requested hostname.
- * callback - The function to be called when certificate files' path were already computed.
+### proxy.onConnect
 
-__Example 1__
+Adds a handler for the HTTP CONNECT method, called before the proxy tunnels the connection. Returning without an error allows the default tunnelling behaviour.
 
-    proxy.onCertificateRequired = function(hostname, callback) {
-      return callback(null, {
-        keyFile: path.resolve('/ca/certs/', hostname + '.key'),
-        certFile: path.resolve('/ca/certs/', hostname + '.crt')
-      });
-    };
+```javascript
+proxy.onConnect(function(req, socket, head, callback) {
+  console.log('CONNECT', req.url);
+  return callback();
+});
+```
 
-__Example 2: Wilcard certificates__
+---
 
-    proxy.onCertificateRequired = function(hostname, callback) {
-      return callback(null, {
-        keyFile: path.resolve('/ca/certs/', hostname + '.key'),
-        certFile: path.resolve('/ca/certs/', hostname + '.crt'),
-        hosts: ["*.mydomain.com"]
-      });
-    };
+### proxy.onRequestHeaders
 
+Adds a handler called after request headers are parsed but before forwarding upstream. Modify `ctx.proxyToServerRequestOptions.headers` here.
 
-<a name="proxy_onCertificateMissing" />
+```javascript
+proxy.onRequestHeaders(function(ctx, callback) {
+  ctx.proxyToServerRequestOptions.headers['x-forwarded-by'] = 'my-proxy';
+  return callback();
+});
+```
 
-### proxy.onCertificateMissing = function(ctx, files, callback)
+---
 
-Allows you to handle missing certificate files for current request, for example, creating them on the fly.
+### proxy.onRequest
 
-__Arguments__
+Adds a handler called at the beginning of each proxied request. Modify `ctx.proxyToServerRequestOptions` to change the upstream target, method, or headers.
 
-* ctx - Context with the following properties
- * hostname - The hostname which requires certificates
- * data.keyFileExists - Whether key file exists or not
- * data.certFileExists - Whether certificate file exists or not
-* files - missing files names (`files.keyFile`, `files.certFile` and optional `files.hosts`)
-* callback - The function to be called to pass certificate data back (`keyFileData` and `certFileData`)
+```javascript
+proxy.onRequest(function(ctx, callback) {
+  console.log('REQUEST:', ctx.clientToProxyRequest.method, ctx.clientToProxyRequest.url);
+  return callback();
+});
+```
 
-__Example 1__
+---
 
-    proxy.onCertificateMissing = function(ctx, files, callback) {
-      console.log('Looking for "%s" certificates',   ctx.hostname);
-      console.log('"%s" missing', ctx.files.keyFile);
-      console.log('"%s" missing', ctx.files.certFile);
+### proxy.onRequestData
 
-      // Here you have the last chance to provide certificate files data
-      // A tipical use case would be creating them on the fly
-      //
-      // return callback(null, {
-      //   keyFileData: keyFileData,
-      //   certFileData: certFileData
-      // });
-      };
+Adds a handler for each chunk of request body data. Pass the (possibly modified) `Buffer` back via `callback(null, chunk)`.
 
-__Example 2: Wilcard certificates__
+```javascript
+proxy.onRequestData(function(ctx, chunk, callback) {
+  console.log('REQUEST BODY CHUNK:', chunk.toString());
+  return callback(null, chunk);
+});
+```
 
-    proxy.onCertificateMissing = function(ctx, files, callback) {
-      return callback(null, {
-        keyFileData: keyFileData,
-        certFileData: certFileData,
-        hosts: ["*.mydomain.com"]
-      });
-    };
+---
 
+### proxy.onRequestEnd
 
-<a name="proxy_onRequest" />
+Adds a handler called when the entire request body has been received.
 
-### proxy.onRequest(fn) or ctx.onRequest(fn)
+```javascript
+var chunks = [];
 
-Adds a function to get called at the beginning of a request.
+proxy.onRequestData(function(ctx, chunk, callback) {
+  chunks.push(chunk);
+  return callback(null, chunk);
+});
 
-__Arguments__
+proxy.onRequestEnd(function(ctx, callback) {
+  console.log('REQUEST BODY:', Buffer.concat(chunks).toString());
+  return callback();
+});
+```
 
- * fn(ctx, callback) - The function that gets called on each request.
+---
 
-__Example__
+### proxy.onResponseHeaders
 
-    proxy.onRequest(function(ctx, callback) {
-      console.log('REQUEST:', ctx.clientToProxyRequest.url);
-      return callback();
-    });
+Adds a handler called after response headers arrive from the server but before they are sent to the client. Modify `ctx.serverToProxyResponse.headers` here.
 
-<a name="proxy_onRequestData" />
+```javascript
+proxy.onResponseHeaders(function(ctx, callback) {
+  ctx.serverToProxyResponse.headers['x-proxied-by'] = 'my-proxy';
+  return callback();
+});
+```
 
-### proxy.onRequestData(fn) or ctx.onRequestData(fn)
+---
 
-Adds a function to get called for each request data chunk (the body).
+### proxy.onResponse
 
-__Arguments__
+Adds a handler called at the beginning of each upstream response.
 
- * fn(ctx, chunk, callback) - The function that gets called for each data chunk.
+```javascript
+proxy.onResponse(function(ctx, callback) {
+  console.log('RESPONSE:', ctx.serverToProxyResponse.statusCode, ctx.clientToProxyRequest.url);
+  return callback();
+});
+```
 
-__Example__
+---
 
-    proxy.onRequestData(function(ctx, chunk, callback) {
-      console.log('REQUEST DATA:', chunk.toString());
-      return callback(null, chunk);
-    });
+### proxy.onResponseData
 
-<a name="proxy_onRequestEnd" />
+Adds a handler for each chunk of response body data. Registering this handler switches the response to **chunked transfer encoding** (removes `content-length`). Pass the (possibly modified) `Buffer` back via `callback(null, chunk)`.
 
-### proxy.onRequestEnd(fn) or ctx.onRequestEnd(fn)
+```javascript
+proxy.onResponseData(function(ctx, chunk, callback) {
+  // Replace text in the response body
+  chunk = Buffer.from(chunk.toString().replace(/foo/g, 'bar'));
+  return callback(null, chunk);
+});
+```
 
-Adds a function to get called when all request data (the body) was sent.
+---
 
-__Arguments__
+### proxy.onResponseEnd
 
- * fn(ctx, callback) - The function that gets called when all request data (the body) was sent.
+Adds a handler called when the entire response body has been forwarded.
 
-__Example__
+```javascript
+proxy.onResponseEnd(function(ctx, callback) {
+  console.log('RESPONSE END');
+  return callback();
+});
+```
 
-    var chunks = [];
-    
-    proxy.onRequestData(function(ctx, chunk, callback) {
-      chunks.push(chunk);
-      return callback(null, chunk);
-    });
+---
 
-    proxy.onRequestEnd(function(ctx, callback) {
-      console.log('REQUEST END', (Buffer.concat(chunks)).toString());
-      return callback();
-    });
+### proxy.onWebSocketConnection
 
-<a name="proxy_onResponse" />
+Adds a handler called when a WebSocket connection is established through the proxy.
 
-### proxy.onResponse(fn) or ctx.onResponse(fn)
+```javascript
+proxy.onWebSocketConnection(function(ctx, callback) {
+  console.log('WEBSOCKET CONNECT:', ctx.proxyToServerWebSocketOptions.url);
+  return callback();
+});
+```
 
-Adds a function to get called at the beginning of the response.
+---
 
-__Arguments__
+### proxy.onWebSocketSend
 
- * fn(ctx, callback) - The function that gets called on each response.
+Adds a handler for WebSocket messages sent **from the client to the server**.
 
-__Example__
+```javascript
+proxy.onWebSocketSend(function(ctx, message, flags, callback) {
+  console.log('WS CLIENT→SERVER:', message);
+  return callback(null, message, flags);
+});
+```
 
-    proxy.onResponse(function(ctx, callback) {
-      console.log('BEGIN RESPONSE');
-      return callback();
-    });
+---
 
-<a name="proxy_onResponseData" />
+### proxy.onWebSocketMessage
 
-### proxy.onResponseData(fn) or ctx.onResponseData(fn)
+Adds a handler for WebSocket messages sent **from the server to the client**.
 
-Adds a function to get called for each response data chunk (the body).
+```javascript
+proxy.onWebSocketMessage(function(ctx, message, flags, callback) {
+  console.log('WS SERVER→CLIENT:', message);
+  return callback(null, message, flags);
+});
+```
 
-__Arguments__
+---
 
- * fn(ctx, chunk, callback) - The function that gets called for each data chunk.
+### proxy.onWebSocketFrame
 
-__Example__
+Adds a handler for **all** WebSocket frames in both directions (type is `'message'`, `'ping'`, or `'pong'`).
 
-    proxy.onResponseData(function(ctx, chunk, callback) {
-      console.log('RESPONSE DATA:', chunk.toString());
-      return callback(null, chunk);
-    });
+```javascript
+proxy.onWebSocketFrame(function(ctx, type, fromServer, data, flags, callback) {
+  console.log('WS FRAME', type, 'from', fromServer ? 'server' : 'client');
+  return callback(null, data, flags);
+});
+```
 
-<a name="proxy_onResponseEnd" />
+---
 
-### proxy.onResponseEnd(fn) or ctx.onResponseEnd(fn)
+### proxy.onWebSocketError
 
-Adds a function to get called when the proxy request to server has ended.
+Adds a handler called when a WebSocket error occurs.
 
-__Arguments__
+```javascript
+proxy.onWebSocketError(function(ctx, err) {
+  console.error('WS ERROR:', err);
+});
+```
 
- * fn(ctx, callback) - The function that gets called when the proxy request to server as ended.
+---
 
-__Example__
+### proxy.onWebSocketClose
 
-    proxy.onResponseEnd(function(ctx, callback) {
-      console.log('RESPONSE END');
-      return callback();
-    });
+Adds a handler called when a WebSocket connection is closed.
 
-<a name="proxy_onWebSocketConnection" />
+```javascript
+proxy.onWebSocketClose(function(ctx, code, message, callback) {
+  console.log('WS CLOSED by', ctx.closedByServer ? 'server' : 'client', code);
+  callback(null, code, message);
+});
+```
 
-### proxy.onWebSocketConnection(fn) or ctx.onWebSocketConnection(fn)
+---
 
-Adds a function to get called at the beginning of websocket connection
+### proxy.use
 
-__Arguments__
+Installs a middleware module — a plain object with any combination of lifecycle hooks.
 
- * fn(ctx, callback) - The function that gets called for each data chunk.
+```javascript
+proxy.use({
+  onError:               function(ctx, err) { },
+  onRequest:             function(ctx, callback) { return callback(); },
+  onRequestData:         function(ctx, chunk, callback) { return callback(null, chunk); },
+  onResponse:            function(ctx, callback) { return callback(); },
+  onResponseData:        function(ctx, chunk, callback) { return callback(null, chunk); },
+  onWebSocketConnection: function(ctx, callback) { return callback(); },
+  onWebSocketSend:       function(ctx, message, flags, callback) { return callback(null, message, flags); },
+  onWebSocketMessage:    function(ctx, message, flags, callback) { return callback(null, message, flags); },
+  onWebSocketError:      function(ctx, err) { },
+  onWebSocketClose:      function(ctx, code, message, callback) { },
+});
+```
 
-__Example__
+**Built-in modules**
 
-    proxy.onWebSocketConnection(function(ctx, callback) {
-      console.log('WEBSOCKET CONNECT:', ctx.clientToProxyWebSocket.upgradeReq.url);
-      return callback();
-    });
+| Module | Description |
+|--------|-------------|
+| `Proxy.gunzip` | Transparently decompresses `gzip`, `deflate`, and `br` (Brotli) response bodies before `onResponseData` handlers. Also advertises `accept-encoding: gzip, deflate, br` to upstream servers. |
+| `Proxy.wildcard` | No-op stub kept for backwards compatibility. Wildcard certificate grouping is now handled internally. |
 
-<a name="proxy_onWebSocketSend" />
+```javascript
+proxy.use(Proxy.gunzip);
+```
 
-### proxy.onWebSocketSend(fn) or ctx.onWebSocketSend(fn)
+---
 
-Adds a function to get called for each WebSocket message sent by the client.
+### ctx.addRequestFilter
 
-__Arguments__
+Inserts a Node.js transform stream into the request body pipeline.
 
- * fn(ctx, message, flags, callback) - The function that gets called  for each WebSocket message sent by the client.
+```javascript
+proxy.onRequest(function(ctx, callback) {
+  ctx.addRequestFilter(zlib.createGunzip());
+  return callback();
+});
+```
 
-__Example__
+---
 
-    proxy.onWebSocketSend(function(ctx, message, flags, callback) {
-      console.log('WEBSOCKET SEND:', ctx.clientToProxyWebSocket.upgradeReq.url, message);
-      return callback(null, message, flags);
-    });
+### ctx.addResponseFilter
 
-<a name="proxy_onWebSocketMessage" />
+Inserts a Node.js transform stream into the response body pipeline. Using this method automatically switches the response to chunked transfer encoding.
 
-### proxy.onWebSocketMessage(fn) or ctx.onWebSocketMessage(fn)
+```javascript
+proxy.onResponse(function(ctx, callback) {
+  ctx.addResponseFilter(zlib.createGzip());
+  return callback();
+});
+```
 
-Adds a function to get called for each WebSocket message received from the server.
+---
 
-__Arguments__
+## Context Properties
 
- * fn(ctx, message, flags, callback) - The function that gets called for each WebSocket message received from the server.
+| Property | Type | Description |
+|----------|------|-------------|
+| `ctx.isSSL` | `boolean` | `true` when the request arrived via an intercepted HTTPS tunnel |
+| `ctx.clientToProxyRequest` | `http.IncomingMessage` | Request received from the client |
+| `ctx.proxyToClientResponse` | `http.ServerResponse` | Response being written back to the client |
+| `ctx.proxyToServerRequest` | `http.ClientRequest` | Request being sent to the upstream server |
+| `ctx.serverToProxyResponse` | `http.IncomingMessage` | Response received from the upstream server |
+| `ctx.proxyToServerRequestOptions` | `object` | Upstream request options — mutate in `onRequest` to change target/method/headers |
+| `ctx.requestFilters` | `stream[]` | Streams added via `addRequestFilter()` |
+| `ctx.responseFilters` | `stream[]` | Streams added via `addResponseFilter()` |
 
-__Example__
+## WebSocket Context Properties
 
-    proxy.onWebSocketMessage(function(ctx, message, flags, callback) {
-      console.log('WEBSOCKET MESSAGE:', ctx.clientToProxyWebSocket.upgradeReq.url, message);
-      return callback(null, message, flags);
-    });
+| Property | Type | Description |
+|----------|------|-------------|
+| `ctx.isSSL` | `boolean` | `true` for WSS connections |
+| `ctx.clientToProxyWebSocket` | `WebSocket` | Client-side WebSocket connection |
+| `ctx.proxyToServerWebSocket` | `WebSocket` | Server-side WebSocket connection |
+| `ctx.closedByServer` | `boolean?` | Set after close — `true` if the server initiated the close |
 
-<a name="proxy_onWebSocketFrame" />
+---
 
-### proxy.onWebSocketFrame(fn) or ctx.onWebSocketFrame(fn)
+## Debugging
 
-Adds a function to get called for each WebSocket frame exchanged (`message`, `ping` or `pong`).
+Set the `DEBUG` environment variable to enable verbose logging:
 
-__Arguments__
+```bash
+DEBUG=http-mitm-proxy node your-proxy.js
+```
 
- * fn(ctx, type, fromServer, data, flags, callback) - The function that gets called for each WebSocket frame exchanged.
+---
 
-__Example__
-
-    proxy.onWebSocketFrame(function(ctx, type, fromServer, data, flags, callback) {
-      console.log('WEBSOCKET FRAME ' + type + ' received from ' + (fromServer ? 'server' : 'client'), ctx.clientToProxyWebSocket.upgradeReq.url, data);
-      return callback(null, data, flags);
-    });
-
-<a name="proxy_onWebSocketError" />
-
-### proxy.onWebSocketError(fn) or ctx.onWebSocketError(fn)
-
-Adds a function to the list of functions to get called if an error occures in WebSocket.
-
-__Arguments__
-
- * fn(ctx, err) - The function to be called on an error in WebSocket.
-
-__Example__
-
-    proxy.onWebSocketError(function(ctx, err) {
-      console.log('WEBSOCKET ERROR:', ctx.clientToProxyWebSocket.upgradeReq.url, err);
-    });
- 
-<a name="proxy_onWebSocketClose" />
-
-### proxy.onWebSocketClose(fn) or ctx.onWebSocketClose(fn)
-
-Adds a function to get called when a WebSocket connection is closed
-
-__Arguments__
-
- * fn(ctx, code, message, callback) - The function that gets when a WebSocket is closed.
-
-__Example__
-
-    proxy.onWebSocketClose(function(ctx, code, message, callback) {
-      console.log('WEBSOCKET CLOSED BY '+(ctx.closedByServer ? 'SERVER' : 'CLIENT'), ctx.clientToProxyWebSocket.upgradeReq.url, code, message);
-      callback(null, code, message);
-    });
-
-<a name="proxy_use" />
-
-### proxy.use(module) or ctx.use(module)
-
-Adds a module into the proxy. Modules encapsulate multiple life cycle processing functions into one object.
-
-__Arguments__
-
- * module - The module to add. Modules contain a hash of functions to add.
-
-__Example__
-
-    proxy.use({
-      onError: function(ctx, err) { },
-      onCertificateRequired: function(hostname, callback) { return callback(); },
-      onCertificateMissing: function(ctx, files, callback) { return callback(); },
-      onRequest: function(ctx, callback) { return callback(); },
-      onRequestData: function(ctx, chunk, callback) { return callback(null, chunk); },
-      onResponse: function(ctx, callback) { return callback(); },
-      onResponseData: function(ctx, chunk, callback) { return callback(null, chunk); },
-      onWebSocketConnection: function(ctx, callback) { return callback(); },
-      onWebSocketSend: function(ctx, message, flags, callback) { return callback(null, message, flags); },
-      onWebSocketMessage: function(ctx, message, flags, callback) { return callback(null, message, flags); },
-      onWebSocketError: function(ctx, err) {  },
-      onWebSocketClose: function(ctx, code, message, callback) {  },
-    });
-
-node-http-mitm-proxy provide some ready to use modules:
-- `Proxy.gunzip` Gunzip response filter (uncompress gzipped content before onResponseData and compress back after)
-- `Proxy.wildcard` Generates wilcard certificates by default (so less certificates are generated)
-
-<a name="context"/>
-
-## Context
-
-<a name="context_addRequestFilter" />
-
-### ctx.addRequestFilter(stream)
-
-Adds a stream into the request body stream.
-
-__Arguments__
-
- * stream - The read/write stream to add in the request body stream.
-
-__Example__
-
-    ctx.addRequestFilter(zlib.createGunzip());
-
-<a name="context_addRequestFilter" />
-
-### ctx.addResponseFilter(stream)
-
-Adds a stream into the response body stream.
-
-__Arguments__
-
- * stream - The read/write stream to add in the response body stream.
-
-__Example__
-
-    ctx.addResponseFilter(zlib.createGunzip());
-
-# License
+## License
 
 ```
 Copyright (c) 2015 Joe Ferner
+Copyright (c) 2026 Swarup Banerjee
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -538,16 +554,12 @@ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
-
-
 The above copyright notice and this permission notice shall be included in
 all copies or substantial portions of the Software.
 
-
-
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
